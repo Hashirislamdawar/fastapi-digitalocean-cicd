@@ -112,8 +112,8 @@ jobs:
           docker push ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:latest
           docker push ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
 
-  deploy-preparation:
-    name: Deployment preparation
+  deploy:
+    name: Deploy to DigitalOcean
     runs-on: ubuntu-latest
     needs: docker-build
 
@@ -128,6 +128,65 @@ jobs:
           printf '%s\n' '45.55.86.55 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMxM4o/pizcYeXQbpy+dgODL552/wJiujXQGRtpoyGF' > "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
 
-      - name: Verify immutable GHCR image
+      - name: Deploy immutable GHCR image
         run: |
-          ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" deploy@45.55.86.55 "docker pull ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }} && docker image inspect ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}"
+          ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" deploy@45.55.86.55 "NEW_IMAGE='ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}' bash -s" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          echo "Deploying image: $NEW_IMAGE"
+
+          if ! docker inspect fastapi-api >/dev/null 2>&1; then
+            echo "Existing container fastapi-api does not exist; refusing to assume an old image."
+            exit 1
+          fi
+
+          OLD_IMAGE="$(docker inspect --format '{{.Config.Image}}' fastapi-api)"
+          if [ -z "$OLD_IMAGE" ]; then
+            echo "Could not determine the image used by fastapi-api."
+            exit 1
+          fi
+          echo "Current image: $OLD_IMAGE"
+
+          docker pull "$NEW_IMAGE"
+          docker image inspect "$NEW_IMAGE" >/dev/null
+
+          docker stop fastapi-api
+          docker rm fastapi-api
+          docker run -d \
+            --name fastapi-api \
+            -p 127.0.0.1:8000:8000 \
+            --restart unless-stopped \
+            "$NEW_IMAGE"
+
+          diagnose_failure() {
+            echo "Deployment health check failed. Docker diagnostics:"
+            docker ps -a
+            docker logs --tail 100 fastapi-api || true
+            exit 1
+          }
+
+          sleep 5
+
+          if ! DIRECT_RESPONSE="$(curl --fail --silent --show-error http://127.0.0.1:8000/health)"; then
+            diagnose_failure
+          fi
+          if [ "$DIRECT_RESPONSE" != '{"status":"healthy"}' ]; then
+            echo "Unexpected direct health response: $DIRECT_RESPONSE"
+            diagnose_failure
+          fi
+          echo "Health check: $DIRECT_RESPONSE"
+
+          if ! docker ps --filter "name=^/fastapi-api$" --filter status=running --format '{{.Names}}' | grep -qx fastapi-api; then
+            diagnose_failure
+          fi
+          docker ps
+
+          if ! NGINX_RESPONSE="$(curl --fail --silent --show-error http://127.0.0.1/health)"; then
+            diagnose_failure
+          fi
+          if [ "$NGINX_RESPONSE" != '{"status":"healthy"}' ]; then
+            echo "Unexpected Nginx health response: $NGINX_RESPONSE"
+            diagnose_failure
+          fi
+          echo "Nginx health check: $NGINX_RESPONSE"
+          REMOTE_SCRIPT
