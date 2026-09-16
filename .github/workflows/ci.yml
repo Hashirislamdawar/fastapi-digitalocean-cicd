@@ -158,35 +158,82 @@ jobs:
             --restart unless-stopped \
             "$NEW_IMAGE"
 
-          diagnose_failure() {
+          rollback_and_fail() {
             echo "Deployment health check failed. Docker diagnostics:"
             docker ps -a
             docker logs --tail 100 fastapi-api || true
+
+            echo "Starting rollback to previous image: $OLD_IMAGE"
+            if docker ps -a --filter "name=^/fastapi-api$" --format '{{.Names}}' | grep -qx fastapi-api; then
+              docker stop fastapi-api || true
+              docker rm fastapi-api || true
+            fi
+
+            rollback_failed=0
+            if ! docker image inspect "$OLD_IMAGE" >/dev/null 2>&1; then
+              echo "Previous image is not available locally: $OLD_IMAGE"
+              rollback_failed=1
+            elif ! docker run -d \
+              --name fastapi-api \
+              -p 127.0.0.1:8000:8000 \
+              --restart unless-stopped \
+              "$OLD_IMAGE"; then
+              rollback_failed=1
+            fi
+
+            sleep 5
+
+            if [ "$rollback_failed" -eq 0 ]; then
+              if ! docker ps --filter "name=^/fastapi-api$" --filter status=running --format '{{.Names}}' | grep -qx fastapi-api; then
+                rollback_failed=1
+              fi
+            fi
+
+            if [ "$rollback_failed" -eq 0 ]; then
+              if ! curl --fail --silent --show-error http://127.0.0.1:8000/health >/dev/null; then
+                rollback_failed=1
+              fi
+            fi
+
+            if [ "$rollback_failed" -eq 0 ]; then
+              if ! curl --fail --silent --show-error http://127.0.0.1/health >/dev/null; then
+                rollback_failed=1
+              fi
+            fi
+
+            if [ "$rollback_failed" -ne 0 ]; then
+              echo "Rollback failed. Docker diagnostics:"
+              docker ps -a
+              docker logs --tail 100 fastapi-api || true
+              exit 1
+            fi
+
+            echo "Rollback successful. Restored previous image: $OLD_IMAGE"
             exit 1
           }
 
           sleep 5
 
           if ! DIRECT_RESPONSE="$(curl --fail --silent --show-error http://127.0.0.1:8000/health)"; then
-            diagnose_failure
+            rollback_and_fail
           fi
           if [ "$DIRECT_RESPONSE" != '{"status":"healthy"}' ]; then
             echo "Unexpected direct health response: $DIRECT_RESPONSE"
-            diagnose_failure
+            rollback_and_fail
           fi
           echo "Health check: $DIRECT_RESPONSE"
 
           if ! docker ps --filter "name=^/fastapi-api$" --filter status=running --format '{{.Names}}' | grep -qx fastapi-api; then
-            diagnose_failure
+            rollback_and_fail
           fi
           docker ps
 
           if ! NGINX_RESPONSE="$(curl --fail --silent --show-error http://127.0.0.1/health)"; then
-            diagnose_failure
+            rollback_and_fail
           fi
           if [ "$NGINX_RESPONSE" != '{"status":"healthy"}' ]; then
             echo "Unexpected Nginx health response: $NGINX_RESPONSE"
-            diagnose_failure
+            rollback_and_fail
           fi
           echo "Nginx health check: $NGINX_RESPONSE"
           REMOTE_SCRIPT
