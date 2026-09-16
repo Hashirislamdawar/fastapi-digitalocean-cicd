@@ -111,3 +111,23 @@ jobs:
         run: |
           docker push ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:latest
           docker push ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
+
+  deploy-preparation:
+    name: Deployment preparation
+    runs-on: ubuntu-latest
+    needs: docker-build
+
+    steps:
+      - name: Configure SSH access
+        env:
+          DO_SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DO_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' '45.55.86.55 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMxM4o/pizcYeXQbpy+dgODL552/wJiujXQGRtpoyGF' > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+      - name: Verify immutable GHCR image
+        run: |
+          ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" deploy@45.55.86.55 "docker pull ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }} && docker image inspect ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}"
