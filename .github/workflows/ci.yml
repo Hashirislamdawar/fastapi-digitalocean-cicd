@@ -156,8 +156,7 @@ jobs:
             --name fastapi-api \
             -p 127.0.0.1:8000:8000 \
             --restart unless-stopped \
-            "$NEW_IMAGE" \
-            /bin/sh -c 'echo "INTENTIONAL ROLLBACK TEST"; exit 1'
+            "$NEW_IMAGE"
 
           rollback_and_fail() {
             echo "Deployment health check failed. Docker diagnostics:"
