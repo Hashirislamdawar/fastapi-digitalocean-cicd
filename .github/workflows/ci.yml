@@ -11,7 +11,7 @@ name: CI
 
 permissions:
   contents: read
-  actions: write
+  packages: write
 
 jobs:
   test:
@@ -36,9 +36,10 @@ jobs:
         run: pytest
 
   docker-build:
-    name: Docker build
+    name: Docker build and push
     runs-on: ubuntu-latest
     needs: test
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,11 +47,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
-          tags: fastapi-cicd:test
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/fastapi-digitalocean-cicd:latest
+            ghcr.io/${{ github.repository_owner }}/fastapi-digitalocean-cicd:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
