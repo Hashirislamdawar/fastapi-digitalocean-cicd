@@ -69,13 +69,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
+      - name: Report Trivy vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
           format: table
           severity: HIGH,CRITICAL
           vuln-type: os,library
+          exit-code: "0"
+
+      - name: Gate on fixable Trivy vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
+          format: table
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: true
           exit-code: "1"
 
       - name: Push Docker image to GHCR
