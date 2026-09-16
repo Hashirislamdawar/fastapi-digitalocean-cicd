@@ -13,3 +13,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# SSH private keys
+*.pem
+id_*
+*.key
