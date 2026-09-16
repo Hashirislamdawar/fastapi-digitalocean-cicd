@@ -61,6 +61,8 @@ jobs:
           context: .
           push: false
           load: true
+          pull: true
+          no-cache: true
           tags: |
             ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:latest
             ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
