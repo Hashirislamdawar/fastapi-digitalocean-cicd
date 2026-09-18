@@ -44,7 +44,6 @@ jobs:
         env:
           DO_SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
         run: |
-          trap 'rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"' EXIT
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DO_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
@@ -54,6 +53,11 @@ jobs:
       - name: Verify SSH connectivity
         run: |
           ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" deploy@45.55.86.55 "hostname; docker ps --format '{{.Names}}'"
+
+      - name: Clean up SSH credentials
+        if: always()
+        run: |
+          rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
 
   docker-build:
     name: Docker build, scan, and push
@@ -126,7 +130,6 @@ jobs:
         env:
           DO_SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
         run: |
-          trap 'rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"' EXIT
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DO_SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
           chmod 600 "$HOME/.ssh/id_ed25519"
@@ -242,3 +245,8 @@ jobs:
           fi
           echo "Nginx health check: $NGINX_RESPONSE"
           REMOTE_SCRIPT
+
+      - name: Clean up SSH credentials
+        if: always()
+        run: |
+          rm -f "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
