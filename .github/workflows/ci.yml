@@ -139,12 +139,23 @@ jobs:
           printf '%s\n' '45.55.86.55 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMxM4o/pizcYeXQbpy+dgODL552/wJiujXQGRtpoyGF' > "$HOME/.ssh/known_hosts"
           chmod 644 "$HOME/.ssh/known_hosts"
 
+      - name: Deployment audit information
+        run: |
+          echo "[AUDIT] Repository: ${{ github.repository }}"
+          echo "[AUDIT] Commit SHA: ${{ github.sha }}"
+          echo "[AUDIT] Ref: ${{ github.ref }}"
+          echo "[AUDIT] Actor: ${{ github.actor }}"
+          echo "[AUDIT] Workflow run ID: ${{ github.run_id }}"
+          echo "[AUDIT] Deployment environment: production"
+          echo "[AUDIT] Immutable image: ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}"
+
       - name: Deploy immutable GHCR image
         run: |
           ssh -o IdentitiesOnly=yes -i "$HOME/.ssh/id_ed25519" deploy@45.55.86.55 "NEW_IMAGE='ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}' bash -s" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
-          echo "Deploying image: $NEW_IMAGE"
+          echo "[DEPLOY] Deployment started"
+          echo "[DEPLOY] New image: $NEW_IMAGE"
 
           if ! docker inspect fastapi-api >/dev/null 2>&1; then
             echo "Existing container fastapi-api does not exist; refusing to assume an old image."
@@ -156,24 +167,31 @@ jobs:
             echo "Could not determine the image used by fastapi-api."
             exit 1
           fi
-          echo "Current image: $OLD_IMAGE"
+          echo "[DEPLOY] Current image: $OLD_IMAGE"
 
           docker pull "$NEW_IMAGE"
           docker image inspect "$NEW_IMAGE" >/dev/null
+          echo "[DEPLOY] New image successfully pulled: $NEW_IMAGE"
 
+          echo "[DEPLOY] Stopping and removing old container"
           docker stop fastapi-api
           docker rm fastapi-api
+          echo "[DEPLOY] Old container stopped and removed"
           docker run -d \
             --name fastapi-api \
             -p 127.0.0.1:8000:8000 \
             --restart unless-stopped \
             "$NEW_IMAGE"
+          echo "[DEPLOY] New container started"
 
           rollback_and_fail() {
+            echo "[ROLLBACK] Deployment failed"
             echo "Deployment health check failed. Docker diagnostics:"
             docker ps -a
             docker logs --tail 100 fastapi-api || true
 
+            echo "[ROLLBACK] Rollback started"
+            echo "[ROLLBACK] Restoring old image: $OLD_IMAGE"
             echo "Starting rollback to previous image: $OLD_IMAGE"
             if docker ps -a --filter "name=^/fastapi-api$" --format '{{.Names}}' | grep -qx fastapi-api; then
               docker stop fastapi-api || true
@@ -190,8 +208,11 @@ jobs:
               --restart unless-stopped \
               "$OLD_IMAGE"; then
               rollback_failed=1
+            else
+              echo "[ROLLBACK] Rollback container started"
             fi
 
+            echo "[ROLLBACK] Rollback health verification started"
             sleep 5
 
             if [ "$rollback_failed" -eq 0 ]; then
@@ -213,16 +234,19 @@ jobs:
             fi
 
             if [ "$rollback_failed" -ne 0 ]; then
+              echo "[ROLLBACK] Rollback failed"
               echo "Rollback failed. Docker diagnostics:"
               docker ps -a
               docker logs --tail 100 fastapi-api || true
               exit 1
             fi
 
+            echo "[ROLLBACK] Rollback succeeded"
             echo "Rollback successful. Restored previous image: $OLD_IMAGE"
             exit 1
           }
 
+          echo "[HEALTH] Docker health check started"
           health_status=""
           health_elapsed=0
           while [ "$health_elapsed" -lt 60 ]; do
@@ -231,6 +255,7 @@ jobs:
 
             case "$health_status" in
               healthy)
+                echo "[HEALTH] Docker health became healthy"
                 break
                 ;;
               unhealthy)
@@ -262,6 +287,7 @@ jobs:
             rollback_and_fail
           fi
           echo "Health check: $DIRECT_RESPONSE"
+          echo "[HEALTH] Direct FastAPI health check passed"
 
           if ! docker ps --filter "name=^/fastapi-api$" --filter status=running --format '{{.Names}}' | grep -qx fastapi-api; then
             rollback_and_fail
@@ -276,6 +302,8 @@ jobs:
             rollback_and_fail
           fi
           echo "Nginx health check: $NGINX_RESPONSE"
+          echo "[HEALTH] Nginx health check passed"
+          echo "[DEPLOY] Deployment completed successfully"
           REMOTE_SCRIPT
 
       - name: Clean up SSH credentials
