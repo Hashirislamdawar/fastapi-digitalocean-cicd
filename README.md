@@ -1,353 +1,342 @@
 # FastAPI DigitalOcean CI/CD
 
-A beginner-friendly FastAPI REST API that will later be containerized and deployed to DigitalOcean through a GitHub Actions CI/CD pipeline.
+[![CI](https://github.com/Hashirislamdawar/fastapi-digitalocean-cicd/actions/workflows/ci.yml/badge.svg)](https://github.com/Hashirislamdawar/fastapi-digitalocean-cicd/actions/workflows/ci.yml)
 
-This repository currently contains **Stage 1** (FastAPI application), **Stage 2** (Docker), **Stage 3** (GitHub Actions CI), and **Stage 4** (GHCR image publishing). The current stage adds Terraform-based DigitalOcean infrastructure provisioning for a later deployment pipeline.
+A production-style CI/CD pipeline for a containerized FastAPI service using GitHub Actions, GHCR, Terraform, DigitalOcean, Nginx, Trivy, Prometheus, and Grafana.
 
-## Current stack
+This DevOps portfolio project demonstrates automated testing, containerization, infrastructure provisioning, secure immutable deployment, health verification, rollback, and observability.
 
-- Python
-- FastAPI
-- Uvicorn
-- pytest
-- httpx
-- Docker
-- Docker Compose
-- GitHub Actions
+## Highlights
 
-## Project structure
+- Automated CI/CD with GitHub Actions
+- Three-test pytest suite for the FastAPI API
+- Docker image publishing to GitHub Container Registry
+- Immutable commit-SHA production deployments
+- DigitalOcean Droplet provisioned with Terraform
+- Nginx reverse proxy with FastAPI kept on localhost
+- Trivy HIGH/CRITICAL vulnerability scanning
+- Docker, direct HTTP, and Nginx health checks
+- Automatic rollback after failed deployment verification
+- Production deployment concurrency protection
+- Deployment audit logging
+- Prometheus application and infrastructure metrics
+- Grafana monitoring dashboard
+- Node Exporter host monitoring
+- cAdvisor Docker container monitoring
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Developer[Developer] --> GitHub[GitHub]
+    GitHub --> Actions[GitHub Actions]
+    Actions --> Tests[Pytest]
+    Actions --> Build[Docker Build]
+    Actions --> Trivy[Trivy Scan]
+    Actions --> GHCR[GHCR Image]
+    GHCR -->|Immutable commit SHA| Droplet[DigitalOcean Droplet]
+    Droplet --> Nginx[Nginx :80 / :443]
+    Nginx --> API[FastAPI Container :127.0.0.1:8000]
+    API --> Health[/health]
+    API --> Metrics[/metrics]
+    Metrics --> Prometheus[Prometheus :127.0.0.1:9090]
+    NodeExporter[Node Exporter :127.0.0.1:9100] --> Prometheus
+    cAdvisor[cAdvisor :127.0.0.1:8080] --> Prometheus
+    Prometheus --> Grafana[Grafana :127.0.0.1:3000]
+```
+
+The monitoring services are installed on the existing Droplet and remain localhost-only. The production dashboard is configured in Grafana rather than stored as repository provisioning code.
+
+## CI/CD Pipeline
 
 ```text
-fastapi-digitalocean-cicd/
-├── app/
-│   ├── __init__.py
-│   └── main.py
-├── tests/
-│   ├── __init__.py
-│   └── test_api.py
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── Dockerfile
-├── .dockerignore
-├── docker-compose.yml
-├── requirements.txt
-├── .gitignore
-└── README.md
+git push
+  |
+  v
+Run pytest
+  |
+  v
+Build Docker image
+  |
+  v
+Report and gate Trivy findings
+  |
+  v
+Push image to GHCR
+  |
+  v
+SSH to DigitalOcean
+  |
+  v
+Pull commit-SHA image
+  |
+  v
+Replace FastAPI container
+  |
+  v
+Docker health polling
+  |
+  v
+FastAPI and Nginx health checks
+  |
+  v
+Deployment complete or automatic rollback
 ```
 
-## Local installation
+The workflow runs tests and image validation for pushes to `main` and `develop` and pull requests targeting `main`. Production deployment runs only for pushes to `main` and is serialized with the `production-deploy` concurrency group.
 
-Create and activate a virtual environment, then install dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-On Windows PowerShell, activate the environment with:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-## Run tests
-
-From the project root:
-
-```bash
-pytest
-```
-
-Expected result: `3 passed`.
-
-## Start the FastAPI server
-
-From the project root:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-The API will be available at [http://127.0.0.1:8000](http://127.0.0.1:8000).
-
-Interactive docs are available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
-
-## Available API endpoints
-
-| Method | Path       | Description                                      |
-| ------ | ---------- | ------------------------------------------------ |
-| GET    | `/`        | Confirms the application is running              |
-| GET    | `/health`  | Health check for later CI/CD deployment checks   |
-| GET    | `/version` | Returns the application version from FastAPI metadata |
-
-Example requests:
-
-```bash
-curl http://127.0.0.1:8000/
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/version
-```
-
-## Docker
-
-The `Dockerfile` builds a small image from `python:3.12-slim`, installs dependencies, copies the FastAPI app, and starts Uvicorn on `0.0.0.0:8000` so the API is reachable from outside the container.
-
-`.dockerignore` keeps local virtualenv files, caches, Git metadata, and `.env` out of the image build context.
-
-### Build the image
-
-From the project root:
-
-```bash
-docker build -t fastapi-cicd:1.0.0 .
-```
-
-### Run the container
-
-```bash
-docker run -d --name fastapi-cicd -p 8000:8000 fastapi-cicd:1.0.0
-```
-
-Confirm it is running:
-
-```bash
-docker ps
-```
-
-Inspect logs:
-
-```bash
-docker logs fastapi-cicd
-```
-
-### Test the API
-
-```bash
-curl http://localhost:8000/
-curl http://localhost:8000/health
-curl http://localhost:8000/version
-```
-
-Interactive docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-
-`GET /health` should return:
-
-```json
-{
-  "status": "healthy"
-}
-```
-
-### Stop and remove the container
-
-```bash
-docker stop fastapi-cicd
-docker rm fastapi-cicd
-```
-
-### Docker Compose
-
-`docker-compose.yml` defines a single `api` service that builds the local Dockerfile, maps port `8000`, and restarts unless the container is stopped.
-
-Start:
-
-```bash
-docker compose up -d --build
-```
-
-Check status:
-
-```bash
-docker compose ps
-```
-
-Test:
-
-```bash
-curl http://localhost:8000/health
-```
-
-View logs:
-
-```bash
-docker compose logs api
-```
-
-Stop:
-
-```bash
-docker compose down
-```
-
-Do not run `docker run` and `docker compose up` at the same time on port 8000, or they will conflict.
-
-## CI/CD
-
-The repository currently has **CI only**. There is no deployment, DigitalOcean, Terraform, or image registry step yet.
+The image deployed to production is:
 
 ```text
-GitHub Push / Pull Request
-        ↓
-Python Tests
-        ↓
-Docker Build
+ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:${{ github.sha }}
 ```
 
-The workflow in `.github/workflows/ci.yml` runs on:
+The mutable `latest` tag is published for registry convenience, but the deployment job uses the immutable commit-SHA tag. The deployment is a replacement rollout: the current container is stopped before the new one starts, so it is not presented as zero-downtime deployment.
 
-- pushes to `main`
-- pushes to `develop`
-- pull requests targeting `main`
+## Rollback
 
-If pytest fails, the Docker build job is skipped. The Docker job builds `fastapi-cicd:test` to confirm the Dockerfile works; it does **not** push an image.
+Before changing the running service, the deployment:
 
-Future stages will add:
+1. Captures the image currently used by `fastapi-api`.
+2. Pulls and inspects the new immutable image.
+3. Stops and removes the old container.
+4. Starts the new container with the existing name, loopback port mapping, and restart policy.
+5. Polls Docker's native health status for up to 60 seconds.
+6. Verifies the direct FastAPI endpoint and the Nginx endpoint.
 
-- GitHub Container Registry
-- DigitalOcean
-- Terraform
-- automatic deployment
-- security scanning
-- rollback
+If verification fails, the failed container is removed, the captured image is restored, and rollback health is checked. The deployment remains failed after rollback so a failed release is not reported as successful. This rollback path was intentionally exercised during development.
 
-## Stage 5 — Terraform Infrastructure
+## Infrastructure as Code
 
-This stage provisions the DigitalOcean infrastructure required before application deployment begins. It creates a Droplet running Ubuntu, reuses an existing DigitalOcean SSH key, and attaches a cloud firewall with inbound access for SSH, HTTP, and HTTPS. The purpose is to prepare the server for later stages that will install and deploy the FastAPI application.
+Terraform in `terraform/` defines:
 
-The Terraform configuration in `terraform/` includes:
+- A DigitalOcean Ubuntu 22.04 Droplet
+- Region `nyc3`
+- Configurable Droplet size, defaulting to `s-1vcpu-1gb`
+- Lookup of an existing DigitalOcean SSH key
+- DigitalOcean firewall rules for TCP ports 22, 80, and 443
+- Droplet ID, name, and public IP outputs
 
-- DigitalOcean Droplet
-- Ubuntu 22.04 LTS base image
-- existing DigitalOcean SSH key lookup via `digitalocean_ssh_key`
-- DigitalOcean cloud firewall
-- inbound rules for TCP 22, 80, and 443
+The DigitalOcean token is a sensitive Terraform variable. Terraform state, real variable files, and the `.terraform/` directory are excluded from Git. The provider lock file is kept available for reproducible provider selection.
 
-Application deployment is intentionally not part of this stage. No Docker installation, no Nginx setup, no TLS certificates, and no app deployment scripts are included here.
-
-To initialize the Terraform configuration locally, run:
+Terraform commands are intentionally manual:
 
 ```bash
 cd terraform
 terraform init
 terraform fmt
 terraform validate
-```
-
-Before applying changes, review the plan manually:
-
-```bash
 terraform plan
 ```
 
-This stage should only provision infrastructure and should not create or destroy DigitalOcean resources unless you explicitly choose to apply the plan yourself.
+Review the plan before applying infrastructure changes. This repository does not run Terraform automatically in GitHub Actions.
 
-## Stage 6 — Server Preparation
+## Security
 
-Stage 6 prepares the Ubuntu Droplet for later application deployment by installing Docker Engine from Docker's official APT repository, enabling the service, and installing Docker Compose V2 and Docker Buildx. It also creates a dedicated `deploy` user and grants Docker access so the server can host the application in later stages without using root.
+Implemented controls include:
 
-This stage verifies the base operating system, updates package metadata, and confirms Docker is working before any application deployment begins. The FastAPI application is intentionally not deployed in Stage 6.
+- Trivy scanning for OS and library vulnerabilities at HIGH and CRITICAL severity
+- A deployment gate for fixable HIGH/CRITICAL findings
+- Immutable SHA-based image deployment
+- SSH host-key pinning with no `StrictHostKeyChecking=no`
+- Least-privilege GitHub Actions permissions
+- Deployment SSH key supplied through the `DO_SSH_PRIVATE_KEY` repository secret
+- Temporary SSH credential cleanup in both SSH jobs
+- Docker-native health checks and post-deployment verification
+- Automatic rollback on failed health verification
+- Monitoring services bound to localhost
+- DigitalOcean firewall exposure limited to the configured public ports
+- Terraform state, variable files, environment files, and private-key patterns excluded from Git
 
-The server is configured with:
+HTTPS is not currently configured. The current public reverse-proxy path is HTTP through Nginx on port 80.
 
-- Ubuntu 22.04 LTS
-- Docker Engine
-- Docker Compose V2
-- Docker Buildx
-- non-root `deploy` user
-- SSH access for the deploy user using the existing key
+## Monitoring
 
-No application image is pulled, no GitHub Container Registry authentication is added, and no FastAPI container is launched in this stage.
+Prometheus is the metrics backend for the application, host, and container layers.
 
-## Stage 7 — Manual GHCR Deployment
+### FastAPI
 
-Stage 7 demonstrates the manual deployment flow for the existing FastAPI Docker image. The purpose is to understand the deployment process before automating it with GitHub Actions in a later stage.
+The application exposes Prometheus metrics at `/metrics`, including:
 
-The conceptual flow is:
+- `http_requests_total` for request rate and HTTP status analysis
+- `http_request_duration_seconds` for latency analysis
 
-1. Verify whether the GHCR package is public or private.
-2. If required, authenticate Docker to GHCR using a GitHub PAT with package-read access.
-3. Pull the published image from `ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:latest`.
-4. Run the container on the Droplet with a name such as `fastapi-api` and port mapping `8000:8000`.
-5. Configure a restart policy of `unless-stopped`.
-6. Verify the application endpoints locally and confirm the container started successfully.
+The Grafana dashboard uses these metrics for request rate, HTTP 5xx rate, P95 latency, and target health.
 
-Important notes:
+### Node Exporter
 
-- `latest` is convenient for manual deployment but is mutable.
-- In production, immutable commit-SHA tags are preferred over `latest`.
-- No real GitHub token should be committed to the repository or documented in the README.
-- The application is intentionally deployed manually here; GitHub Actions automation is not added in this stage.
+Node Exporter provides host metrics for:
 
-Example login command pattern:
+- CPU utilization
+- Memory utilization
+- Root filesystem usage
+- System load
+
+### cAdvisor
+
+cAdvisor provides Docker container metrics for:
+
+- Container CPU
+- Container memory
+- Container network receive rate
+- Container network transmit rate
+
+### Grafana dashboard
+
+The production-style dashboard is named **FastAPI CI/CD Infrastructure & Application Monitoring** and uses UID `fastapi-devops-monitoring`. It has application, server health, Docker/container, and monitoring-status sections with a 15-minute default view and 30-second refresh interval.
+
+No dashboard screenshot is committed to the repository. The dashboard is maintained in the server-side Grafana instance.
+
+## Project Structure
+
+```text
+fastapi-digitalocean-cicd/
+├── app/
+│   ├── __init__.py
+│   └── main.py                 # FastAPI routes and Prometheus instrumentation
+├── tests/
+│   ├── __init__.py
+│   └── test_api.py             # API endpoint tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml              # Tests, image build, scan, push, and deployment
+├── terraform/
+│   ├── .gitignore              # State and local Terraform secret protection
+│   ├── .terraform.lock.hcl     # Provider lock file
+│   ├── main.tf                 # Droplet, SSH key lookup, and firewall
+│   ├── outputs.tf              # Infrastructure outputs
+│   ├── terraform.tfvars.example
+│   └── variables.tf
+├── Dockerfile                  # FastAPI image and native health check
+├── docker-compose.yml          # Local development service
+├── requirements.txt            # Python dependencies
+├── .dockerignore
+├── .gitignore
+└── README.md
+```
+
+Local Terraform state, `.terraform/`, real `terraform.tfvars`, environment files, and private keys are intentionally omitted from the documented tree.
+
+## Local Development
 
 ```bash
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+git clone https://github.com/Hashirislamdawar/fastapi-digitalocean-cicd.git
+cd fastapi-digitalocean-cicd
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest
+uvicorn app.main:app --reload
 ```
 
-Example deploy command pattern:
+On Windows PowerShell, activate the virtual environment with:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+The API is available at `http://127.0.0.1:8000`.
+
+### Docker Compose
+
+The Compose file defines the local `api` service and maps port 8000:
 
 ```bash
-docker run -d \
-  --name fastapi-api \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  ghcr.io/hashirislamdawar/fastapi-digitalocean-cicd:latest
+docker compose up -d --build
+docker compose ps
+docker compose logs api
+docker compose down
 ```
 
-This stage does not add Nginx, TLS, domain configuration, monitoring, or deployment automation. Those are reserved for later stages.
+Compose is intended for local use. The production deployment binds FastAPI to `127.0.0.1:8000` behind Nginx.
 
-## Stage 8 — Nginx Reverse Proxy
+## Testing
 
-Stage 8 adds Nginx as the public reverse proxy in front of the FastAPI container. The public entry point is HTTP on port 80, while the FastAPI container remains internal on `127.0.0.1:8000`.
+Run:
 
-The conceptual flow is:
-
-- Install Nginx from Ubuntu's official package repositories
-- Create a dedicated server block for the FastAPI app
-- Use `proxy_pass http://127.0.0.1:8000;`
-- Keep FastAPI internal to localhost instead of exposing Docker port 8000 publicly
-- Validate the proxy with `nginx -t` and HTTP requests through Nginx
-- Confirm the service is enabled and active
-
-This stage does not configure HTTPS, Certbot, or a domain. TLS and certificate handling belong to later stages.
-
-Example Nginx site pattern:
-
-```nginx
-server {
-    listen 80;
-    server_name 45.55.86.55;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
+```bash
+python -m pytest
 ```
 
-This configuration keeps the FastAPI app off the public internet while allowing Nginx to serve the app over HTTP. HTTPS and HSTS are intentionally not added in this stage.
+The current suite contains 3 tests covering the root, health, and version endpoints. The metrics endpoint and monitoring stack are additionally verified through container and Prometheus/Grafana integration checks.
 
-## Stage 9 — Container Security Scanning
+## Docker
 
-Stage 9 adds Trivy to the GitHub Actions pipeline so the Docker image is scanned for vulnerabilities before it is pushed to GHCR. The scan is limited to CI security validation and does not add automated deployment to DigitalOcean.
+Build and run the image locally:
 
-The workflow now does the following:
+```bash
+docker build -t fastapi-digitalocean-cicd:local .
+docker run -d --name fastapi-api-local -p 127.0.0.1:8000:8000 fastapi-digitalocean-cicd:local
+docker ps
+docker logs fastapi-api-local
+docker rm -f fastapi-api-local
+```
 
-1. Runs Python tests
-2. Builds the Docker image locally in the runner
-3. Scans the built image with Trivy
-4. Fails the pipeline when HIGH or CRITICAL vulnerabilities are found
-5. Pushes the same image to GHCR only after the scan passes
+The Dockerfile uses Python 3.12 slim Bookworm, installs dependencies without a pip cache, exposes a native health check, and starts Uvicorn. The image listens on port 8000 inside the container.
 
-This keeps the existing GHCR image tags intact while making the release process safer. Trivy runs in GitHub Actions only; it is not installed on the DigitalOcean server as part of this stage.
+## API Endpoints
 
-## What's next
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/` | Application status response |
+| GET | `/health` | Deployment and container health check |
+| GET | `/version` | Application version response |
+| GET | `/metrics` | Prometheus-format application metrics |
+| GET | `/docs` | FastAPI Swagger UI |
 
-This project will later be expanded into a complete CD pipeline using GHCR, Terraform, DigitalOcean, and automated FastAPI deployment.
+## Production Deployment
+
+Production deployment requires the configured GitHub repository secret:
+
+- `DO_SSH_PRIVATE_KEY`
+
+The workflow authenticates to the existing `deploy` user using the pinned server ED25519 host key. It does not expose secret values in the repository or logs.
+
+At a high level, deployment:
+
+1. Builds and scans the image.
+2. Pushes the commit-SHA image to GHCR.
+3. Connects to the Droplet over SSH.
+4. Pulls and inspects the immutable image.
+5. Replaces `fastapi-api` on `127.0.0.1:8000`.
+6. Waits for Docker, FastAPI, and Nginx health verification.
+7. Restores the previous image if verification fails.
+
+## Key Engineering Decisions
+
+1. **GHCR** — Stores versioned Docker images produced by CI.
+2. **SHA-based deployment** — Makes the deployed artifact immutable and rollback deterministic.
+3. **Terraform** — Makes the initial DigitalOcean infrastructure reproducible.
+4. **Nginx** — Separates the public HTTP entry point from the internal FastAPI listener.
+5. **Prometheus and Grafana** — Provide application, host, and container observability.
+6. **Node Exporter and cAdvisor** — Separate host-level and Docker container-level monitoring.
+7. **Health checks and rollback** — Prevent a failed release from remaining active.
+8. **Deployment concurrency** — Prevents two production rollouts from changing the Droplet simultaneously.
+
+## What This Project Demonstrates
+
+This project demonstrates hands-on experience with:
+
+- Linux server administration
+- Docker and Docker Compose
+- GitHub Actions and CI/CD
+- Infrastructure as Code with Terraform
+- DigitalOcean
+- Container registries
+- Vulnerability scanning
+- Nginx reverse proxies
+- Deployment automation
+- Health checks and rollback strategies
+- Prometheus and Grafana
+- Host and container observability
+- Git and GitHub
+
+## Future Improvements
+
+The following are not currently implemented:
+
+- HTTPS with a custom domain
+- Alerting and contact points
+- A staging environment
+- Blue/green or rolling deployment
+- Centralized log collection
