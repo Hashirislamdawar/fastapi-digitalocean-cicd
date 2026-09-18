@@ -220,7 +220,36 @@ jobs:
             exit 1
           }
 
-          sleep 5
+          health_status=""
+          health_elapsed=0
+          while [ "$health_elapsed" -lt 60 ]; do
+            health_status="$(docker inspect --format '{{.State.Health.Status}}' fastapi-api 2>/dev/null || true)"
+            echo "Docker health status after ${health_elapsed}s: ${health_status:-unavailable}"
+
+            case "$health_status" in
+              healthy)
+                break
+                ;;
+              unhealthy)
+                echo "Docker health status is unhealthy."
+                rollback_and_fail
+                ;;
+              "")
+                echo "Docker has not reported a health status yet."
+                ;;
+              *)
+                echo "Waiting for Docker health status to become healthy."
+                ;;
+            esac
+
+            sleep 2
+            health_elapsed=$((health_elapsed + 2))
+          done
+
+          if [ "$health_status" != "healthy" ]; then
+            echo "Docker health status did not become healthy within 60 seconds."
+            rollback_and_fail
+          fi
 
           if ! DIRECT_RESPONSE="$(curl --fail --silent --show-error http://127.0.0.1:8000/health)"; then
             rollback_and_fail
