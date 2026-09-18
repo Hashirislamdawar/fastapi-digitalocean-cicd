@@ -34,12 +34,15 @@ flowchart TD
     Actions --> Build[Docker Build]
     Actions --> Trivy[Trivy Scan]
     Actions --> GHCR[GHCR Image]
+
     GHCR -->|Immutable commit SHA| Droplet[DigitalOcean Droplet]
     Droplet --> Nginx[Nginx :80 / :443]
     Nginx --> API[FastAPI Container :127.0.0.1:8000]
-    API --> Health[/health]
-    API --> Metrics[/metrics]
+
+    API --> Health["/health"]
+    API --> Metrics["/metrics"]
     Metrics --> Prometheus[Prometheus :127.0.0.1:9090]
+
     NodeExporter[Node Exporter :127.0.0.1:9100] --> Prometheus
     cAdvisor[cAdvisor :127.0.0.1:8080] --> Prometheus
     Prometheus --> Grafana[Grafana :127.0.0.1:3000]
